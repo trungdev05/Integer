@@ -2,13 +2,12 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <chrono>
 #include <cmath>
 #include <limits>
 #include <queue>
-#include <random>
 #include <ranges>
 #include <vector>
+#pragma GCC optimize("O3")
 using namespace std;
 
 namespace FFT {
@@ -63,14 +62,10 @@ namespace FFT {
     }
 
     using float_t = double;
-    constexpr float_t ONE = 1;
-    constexpr double PI = 3.141592653589793238462643383279502884;
+    static constexpr float_t ONE = 1;
+    static constexpr double PI = 3.141592653589793238462643383279502884;
     inline vector<complex<float_t> > roots = {{0, 0}, {1, 0}};
     inline vector<int> bit_reverse;
-
-    inline bool is_power_of_two(const int n) {
-        return (n & (n - 1)) == 0;
-    }
 
     inline int round_up_power_two(const int n) {
         int bit = n == 0 ? -1 : 31 - __builtin_clz(n);
@@ -78,17 +73,13 @@ namespace FFT {
         return 1 << bit;
     }
 
-    inline int get_length(const int n) {
-        return __builtin_ctz(n);
-    }
-
     inline void bit_reorder(const int n, vector<complex<float_t> > &values) {
         if (static_cast<int>(bit_reverse.size()) != n) {
             bit_reverse.assign(n, 0);
-            const int length = get_length(n);
+            const int length = __builtin_ctz(n);
 
             for (int i = 1; i < n; i++)
-                bit_reverse[i] = (bit_reverse[i >> 1] >> 1) | ((i & 1) << (length - 1));
+                bit_reverse[i] = bit_reverse[i >> 1] >> 1 | (i & 1) << length - 1;
         }
 
         for (int i = 0; i < n; i++)
@@ -96,17 +87,17 @@ namespace FFT {
                 swap(values[i], values[bit_reverse[i]]);
     }
 
-    inline void prepare_roots(int n) {
+    inline void prepare_roots(const int n) {
         if (static_cast<int>(roots.size()) >= n)
             return;
 
-        int length = get_length(static_cast<int>(roots.size()));
+        int length = __builtin_ctz(static_cast<int>(roots.size()));
         roots.resize(n);
 
-        while ((1 << length) < n) {
+        while (1 << length < n) {
             const float_t min_angle = 2 * PI / (1 << (length + 1));
-            for (int i = 0; i < 1 << (length - 1); i++) {
-                const int index = (1 << (length - 1)) + i;
+            for (int i = 0; i < 1 << length - 1; i++) {
+                const int index = (1 << length - 1) + i;
                 roots[2 * index] = roots[index];
                 roots[2 * index + 1] = polar(ONE, min_angle * (2 * i + 1));
             }
@@ -114,7 +105,7 @@ namespace FFT {
         }
     }
 
-    inline void fft_iterative(const int n, vector<complex<float_t> > &values) {
+    inline void fft_iterative(const int n, std::vector<complex<float_t> > &values) {
         prepare_roots(n);
         bit_reorder(n, values);
 
@@ -131,11 +122,11 @@ namespace FFT {
     inline complex<float_t> extract(const int n, const vector<complex<float_t> > &values, const int index,
                                     const int side) {
         if (side == -1) {
-            const int other = (n - index) & (n - 1);
+            const int other = n - index & n - 1;
             return (conj(values[other] * values[other]) - values[index] * values[index]) * complex<float_t>(0, 0.25);
         }
 
-        const int other = (n - index) & (n - 1);
+        const int other = n - index & n - 1;
         const int sign = side == 0 ? +1 : -1;
         const complex<float_t> multiplier = side == 0 ? complex<float_t>(0.5, 0) : complex<float_t>(0, -0.5);
         return multiplier * complex(values[index].real() + values[other].real() * sign,
@@ -171,7 +162,7 @@ namespace FFT {
         const int N = round_up_power_two(n);
 
         const double brute_force_cost = 0.4 * n * n;
-        const double fft_cost = 2.0 * N * (get_length(N) + 3);
+        const double fft_cost = 2.0 * N * (__builtin_ctz(N) + 3);
 
         if (brute_force_cost < fft_cost) {
             vector<T_out> result(output_size);
@@ -194,7 +185,7 @@ namespace FFT {
         fft_iterative(N, values);
 
         for (int i = 0; i <= N / 2; i++) {
-            int j = (N - i) & (N - 1);
+            const int j = N - i & N - 1;
             complex<float_t> even = extract(N, values, i, 0);
             complex<float_t> odd = extract(N, values, i, 1);
             complex<float_t> aux = even * even + odd * odd * roots[N + i] * roots[N + i];
@@ -230,20 +221,19 @@ namespace FFT {
 
         int output_size = circular ? round_up_power_two(max(n, m)) : n + m - 1;
         const int N = round_up_power_two(output_size);
-
         const double brute_force_cost = 0.55 * n * m;
-        const double fft_cost = 1.5 * N * (get_length(N) + 3);
+        const double fft_cost = 1.5 * N * (__builtin_ctz(N) + 3);
 
         if (brute_force_cost < fft_cost) {
             auto mod_output_size = [&](const int x) -> int {
                 return x < output_size ? x : x - output_size;
             };
-
             vector<T_out> result(output_size, 0);
-
-            for (int i = 0; i < n; i++)
-                for (int j = 0; j < m; j++)
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < m; j++) {
                     result[mod_output_size(i + j)] += static_cast<T_out>(left[i]) * static_cast<T_out>(right[j]);
+                }
+            }
 
             return result;
         }
@@ -257,19 +247,21 @@ namespace FFT {
             values[i].imag(static_cast<float_t>(right[i]));
 
         fft_iterative(N, values);
-
         for (int i = 0; i <= N / 2; i++) {
-            int j = (N - i) & (N - 1);
+            const int j = N - i & N - 1;
             complex<float_t> product_i = extract(N, values, i, -1);
             values[i] = product_i;
             values[j] = conj(product_i);
         }
-
         invert_fft(N, values);
         vector<T_out> result(output_size, 0);
-
-        for (int i = 0; i < output_size; i++)
-            result[i] = static_cast<T_out>(is_integral_v<T_out> ? round(values[i].real()) : values[i].real());
+        for (int i = 0; i < output_size; i++) {
+            if constexpr (is_integral_v<T_out>) {
+                result[i] = static_cast<T_out>(round(values[i].real()));
+            } else {
+                result[i] = static_cast<T_out>(values[i].real());
+            }
+        }
 
         return result;
     }
@@ -286,6 +278,8 @@ struct integer {
     static constexpr int KARATSUBA_CUTOFF = 150;
     static constexpr uint64_t U64_BOUND = numeric_limits<uint64_t>::max() - static_cast<uint64_t>(BASE) * BASE;
     static constexpr uint64_t BASE_OVERFLOW_CUTOFF = numeric_limits<uint64_t>::max() / BASE;
+    static constexpr char FIRST_NUMBER_CHAR = '0';
+    static constexpr char LAST_NUMBER_CHAR = '9';
     vector<value_t> values;
 
     integer(const uint64_t x = 0) {
@@ -302,8 +296,8 @@ struct integer {
         value_t p10 = 1;
 
         for (int i = len - 1; i >= 0; i--) {
-            assert('0' <= str[i] && str[i] <= '9');
-            values[index] = static_cast<value_t>(values[index] + p10 * (str[i] - '0'));
+            assert(FIRST_NUMBER_CHAR <= str[i] && str[i] <= LAST_NUMBER_CHAR);
+            values[index] = static_cast<value_t>(values[index] + p10 * (str[i] - FIRST_NUMBER_CHAR));
 
             if (++counter >= SECTION) {
                 counter = 0;
@@ -355,11 +349,11 @@ struct integer {
 
         for (value_t v: values)
             for (int i = 0; i < SECTION; i++) {
-                result += static_cast<char>('0' + v % 10);
+                result += static_cast<char>(FIRST_NUMBER_CHAR + v % 10);
                 v = static_cast<value_t>(v / 10);
             }
 
-        while (result.size() > 1 && result.back() == '0')
+        while (result.size() > 1 && result.back() == FIRST_NUMBER_CHAR)
             result.pop_back();
 
         ranges::reverse(result);
@@ -395,23 +389,6 @@ struct integer {
 
         for (int i = 0; i < n; i++)
             result.values[i + p] = values[i];
-
-        result.trim_check();
-        return result;
-    }
-
-    integer operator>>(const int p) const {
-        assert(p >= 0);
-        const int n = static_cast<int>(values.size());
-
-        if (p >= n)
-            return {0};
-
-        integer result;
-        result.values.resize(n - p);
-
-        for (int i = 0; i < n - p; i++)
-            result.values[i] = values[i + p];
 
         result.trim_check();
         return result;
