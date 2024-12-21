@@ -18,10 +18,10 @@ namespace FFT {
         }
 
         [[nodiscard]] float_t real() const { return x; }
-        [[nodiscard]] float_t imag() const { return y; }
+        [[nodiscard]] float_t imaginary() const { return y; }
 
         void real(float_t _x) { x = _x; }
-        void imag(float_t _y) { y = _y; }
+        void imaginary(float_t _y) { y = _y; }
 
         complex &operator+=(const complex &other) {
             x += other.x;
@@ -42,16 +42,12 @@ namespace FFT {
             return {x * other.x - y * other.y, x * other.y + other.x * y};
         }
 
-        complex operator*(float_t mult) const {
-            return {x * mult, y * mult};
+        complex operator*(float_t scalar) const {
+            return {x * scalar, y * scalar};
         }
 
-        friend complex conj(const complex &c) {
+        friend complex conjugation(const complex &c) {
             return {c.x, -c.y};
-        }
-
-        friend ostream &operator<<(ostream &os, const complex &c) {
-            return os << '(' << c.x << ", " << c.y << ')';
         }
     };
 
@@ -122,19 +118,19 @@ namespace FFT {
                                     const int side) {
         if (side == -1) {
             const int other = n - index & n - 1;
-            return (conj(values[other] * values[other]) - values[index] * values[index]) * complex<float_t>(0, 0.25);
+            return (conjugation(values[other] * values[other]) - values[index] * values[index]) * complex<float_t>(0, 0.25);
         }
 
         const int other = n - index & n - 1;
         const int sign = side == 0 ? +1 : -1;
         const complex<float_t> multiplier = side == 0 ? complex<float_t>(0.5, 0) : complex<float_t>(0, -0.5);
         return multiplier * complex(values[index].real() + values[other].real() * sign,
-                                    values[index].imag() - values[other].imag() * sign);
+                                    values[index].imaginary() - values[other].imaginary() * sign);
     }
 
     inline void invert_fft(const int n, vector<complex<float_t> > &values) {
         for (int i = 0; i < n; i++)
-            values[i] = conj(values[i]) * (ONE / n);
+            values[i] = conjugation(values[i]) * (ONE / n);
 
         for (int i = 0; i < n / 2; i++) {
             complex<float_t> first = values[i] + values[n / 2 + i];
@@ -145,7 +141,7 @@ namespace FFT {
         fft_iterative(n / 2, values);
 
         for (int i = n - 1; i >= 0; i--)
-            values[i] = i % 2 == 0 ? values[i / 2].real() : values[i / 2].imag();
+            values[i] = i % 2 == 0 ? values[i / 2].real() : values[i / 2].imaginary();
     }
 
     constexpr float_t SPLIT_CUTOFF = 2e15;
@@ -190,17 +186,17 @@ namespace FFT {
             complex<float_t> aux = even * even + odd * odd * roots[N + i] * roots[N + i];
             complex<float_t> tmp = even * odd;
             values[i] = aux - complex<float_t>(0, 2) * tmp;
-            values[j] = conj(aux) - complex<float_t>(0, 2) * conj(tmp);
+            values[j] = conjugation(aux) - complex<float_t>(0, 2) * conjugation(tmp);
         }
 
         for (int i = 0; i < N; i++)
-            values[i] = conj(values[i]) * (ONE / N);
+            values[i] = conjugation(values[i]) * (ONE / N);
 
         fft_iterative(N, values);
         vector<T_out> result(output_size);
 
         for (int i = 0; i < output_size; i++) {
-            float_t value = i % 2 == 0 ? values[i / 2].real() : values[i / 2].imag();
+            float_t value = i % 2 == 0 ? values[i / 2].real() : values[i / 2].imaginary();
             result[i] = static_cast<T_out>(is_integral_v<T_out> ? round(value) : value);
         }
 
@@ -243,14 +239,14 @@ namespace FFT {
             values[i].real(static_cast<float_t>(left[i]));
 
         for (int i = 0; i < m; i++)
-            values[i].imag(static_cast<float_t>(right[i]));
+            values[i].imaginary(static_cast<float_t>(right[i]));
 
         fft_iterative(N, values);
         for (int i = 0; i <= N / 2; i++) {
             const int j = N - i & N - 1;
             complex<float_t> product_i = extract(N, values, i, -1);
             values[i] = product_i;
-            values[j] = conj(product_i);
+            values[j] = conjugation(product_i);
         }
         invert_fft(N, values);
         vector<T_out> result(output_size, 0);
@@ -516,12 +512,12 @@ struct integer {
         return *this = *this * other;
     }
 
-    integer operator*(const uint64_t mult) const {
-        if (mult == 0)
+    integer operator*(const uint64_t scalar) const {
+        if (scalar == 0)
             return 0;
 
-        if (mult >= BASE_OVERFLOW_CUTOFF)
-            return *this * integer(mult);
+        if (scalar >= BASE_OVERFLOW_CUTOFF)
+            return *this * integer(scalar);
 
         const int n = static_cast<int>(values.size());
 
@@ -530,7 +526,7 @@ struct integer {
         uint64_t carry = 0;
 
         for (int i = 0; i < n || carry > 0; i++) {
-            uint64_t value = mult * (i < n ? values[i] : 0) + carry;
+            uint64_t value = scalar * (i < n ? values[i] : 0) + carry;
             carry = value / BASE;
             value %= BASE;
             product.checked_add(i, value);
@@ -540,8 +536,8 @@ struct integer {
         return product;
     }
 
-    integer &operator*=(const uint64_t mult) {
-        return *this = *this * mult;
+    integer &operator*=(const uint64_t scalar) {
+        return *this = *this * scalar;
     }
 
     [[nodiscard]] double estimate_div(const integer &other) const {
@@ -583,19 +579,19 @@ struct integer {
             integer chunk = remainder.range(i);
 
             auto div = static_cast<uint64_t>(chunk.estimate_div(other) + 1e-7);
-            integer mult = other * div;
+            integer scalar = other * div;
 
-            while (div > 0 && mult > chunk) {
-                mult -= other;
+            while (div > 0 && scalar > chunk) {
+                scalar -= other;
                 div--;
             }
 
-            while (div < BASE - 1 && mult + other <= chunk) {
-                mult += other;
+            while (div < BASE - 1 && scalar + other <= chunk) {
+                scalar += other;
                 div++;
             }
 
-            remainder -= mult << i;
+            remainder -= scalar << i;
             remainder.trim_check();
 
             if (div > 0)
