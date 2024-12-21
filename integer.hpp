@@ -5,7 +5,6 @@
 #include <cmath>
 #include <limits>
 #include <queue>
-#include <ranges>
 #include <vector>
 #pragma GCC optimize("O3")
 using namespace std;
@@ -688,16 +687,5 @@ struct integer {
 
     friend ostream &operator<<(ostream &os, const integer &x) {
         return os << x.to_string();
-    }
-
-    [[nodiscard]] uint64_t compute_hash() const {
-        uint64_t hash = 0;
-
-        for (const unsigned short value: std::ranges::reverse_view(values)) {
-            constexpr uint64_t BASE_HASH = 10007;
-            constexpr uint64_t MOD = 1000000007;
-            hash = (hash * BASE_HASH + value) % MOD;
-        }
-        return hash;
     }
 };

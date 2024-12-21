@@ -1,6 +1,5 @@
 #include "md5.cpp"
 #include "integer.hpp"
-#include "simd.cpp"
 
 integer generate_large_integer(const int DIGITS) {
     string res;
