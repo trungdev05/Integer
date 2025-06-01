@@ -1,0 +1,23 @@
+{
+  "baseline_info": {
+    "timestamp": "2025-06-01 17:57:08",
+    "seed": 1024,
+    "description": "Baseline performance for 200/1000 points",
+    "system": "Linux x86_64",
+    "compiler": "g++ -std=c++20 -O3 -march=native"
+  },
+  "baseline_times": {
+    "10000": 0.004219,
+    "20000": 0.005116,
+    "50000": 0.005577,
+    "100000": 0.007853,
+    "200000": 0.014495,
+    "500000": 0.027585,
+    "1000000": 0.048617
+  },
+  "scoring_system": {
+    "baseline_score": 200,
+    "max_score": 1000,
+    "description": "Score = baseline_score * (baseline_time / current_time), capped at max_score"
+  }
+} 

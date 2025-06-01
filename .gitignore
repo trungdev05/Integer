@@ -1,3 +1,16 @@
 .idea
 cmake-build-debug
 /.vscode/settings.json
+
+# Ignore benchmark results
+results/
+*.txt
+
+# Ignore temporary files
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore compiled binaries
+*.exe
+*.out
