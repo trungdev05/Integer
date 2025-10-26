@@ -8,9 +8,10 @@
 #include <ostream>
 #include <queue>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 #pragma GCC optimize("O3")
-using namespace std;
 
 namespace FFT {
     template<typename float_t>
@@ -62,27 +63,27 @@ namespace FFT {
     using float_t = double;
     static constexpr float_t ONE = 1;
     static constexpr double PI = 3.141592653589793238462643383279502884;
-    inline vector<complex<float_t> > roots = {{0, 0}, {1, 0}};
-    inline vector<int> bit_reverse;
+    inline thread_local std::vector<complex<float_t>> roots = {{0, 0}, {1, 0}};
+    inline thread_local std::vector<int> bit_reverse;
 
     inline int round_up_power_two(const int n) {
         int bit = n == 0 ? -1 : 31 - __builtin_clz(n);
-        bit += bit < 0 || 1 << bit < n;
+        bit += (bit < 0) || ((1 << bit) < n);
         return 1 << bit;
     }
 
-    inline void bit_reorder(const int n, vector<complex<float_t> > &values) {
+    inline void bit_reorder(const int n, std::vector<complex<float_t>> &values) {
         if (static_cast<int>(bit_reverse.size()) != n) {
             bit_reverse.assign(n, 0);
             const int length = __builtin_ctz(n);
 
             for (int i = 1; i < n; i++)
-                bit_reverse[i] = bit_reverse[i >> 1] >> 1 | (i & 1) << length - 1;
+                bit_reverse[i] = (bit_reverse[i >> 1] >> 1) | ((i & 1) << (length - 1));
         }
 
         for (int i = 0; i < n; i++)
             if (i < bit_reverse[i])
-                swap(values[i], values[bit_reverse[i]]);
+                std::swap(values[i], values[bit_reverse[i]]);
     }
 
     inline void prepare_roots(const int n) {
@@ -92,10 +93,10 @@ namespace FFT {
         int length = __builtin_ctz(static_cast<int>(roots.size()));
         roots.resize(n);
 
-        while (1 << length < n) {
+        while ((1 << length) < n) {
             const float_t min_angle = 2 * PI / (1 << (length + 1));
-            for (int i = 0; i < 1 << length - 1; i++) {
-                const int index = (1 << length - 1) + i;
+            for (int i = 0; i < (1 << (length - 1)); i++) {
+                const int index = (1 << (length - 1)) + i;
                 roots[2 * index] = roots[index];
                 roots[2 * index + 1] = polar(ONE, min_angle * (2 * i + 1));
             }
@@ -103,7 +104,7 @@ namespace FFT {
         }
     }
 
-    inline void fft_iterative(const int n, std::vector<complex<float_t> > &values) {
+    inline void fft_iterative(const int n, std::vector<complex<float_t>> &values) {
         prepare_roots(n);
         bit_reorder(n, values);
 
@@ -117,21 +118,21 @@ namespace FFT {
                 }
     }
 
-    inline complex<float_t> extract(const int n, const vector<complex<float_t> > &values, const int index,
+    inline complex<float_t> extract(const int n, const std::vector<complex<float_t>> &values, const int index,
                                     const int side) {
         if (side == -1) {
-            const int other = n - index & n - 1;
+            const int other = (n - index) & (n - 1);
             return (conjugation(values[other] * values[other]) - values[index] * values[index]) * complex<float_t>(0, 0.25);
         }
 
-        const int other = n - index & n - 1;
+        const int other = (n - index) & (n - 1);
         const int sign = side == 0 ? +1 : -1;
         const complex<float_t> multiplier = side == 0 ? complex<float_t>(0.5, 0) : complex<float_t>(0, -0.5);
         return multiplier * complex(values[index].real() + values[other].real() * sign,
                                     values[index].imaginary() - values[other].imaginary() * sign);
     }
 
-    inline void invert_fft(const int n, vector<complex<float_t> > &values) {
+    inline void invert_fft(const int n, std::vector<complex<float_t>> &values) {
         for (int i = 0; i < n; i++)
             values[i] = conjugation(values[i]) * (ONE / n);
 
@@ -151,7 +152,7 @@ namespace FFT {
     constexpr int SPLIT_BASE = 1 << 15;
 
     template<typename T_out, typename T_in>
-    vector<T_out> square(const vector<T_in> &input) {
+    std::vector<T_out> square(const std::vector<T_in> &input) {
         if (input.empty())
             return {};
 
@@ -163,7 +164,7 @@ namespace FFT {
         const double fft_cost = 2.0 * N * (__builtin_ctz(N) + 3);
 
         if (brute_force_cost < fft_cost) {
-            vector<T_out> result(output_size);
+            std::vector<T_out> result(output_size);
 
             for (int i = 0; i < n; i++) {
                 result[2 * i] += static_cast<T_out>(input[i]) * static_cast<T_out>(input[i]);
@@ -175,7 +176,7 @@ namespace FFT {
         }
 
         prepare_roots(2 * N);
-        vector<complex<float_t> > values(N, 0);
+        std::vector<complex<float_t>> values(N, 0);
 
         for (int i = 0; i < n; i += 2)
             values[i / 2] = complex(static_cast<float_t>(input[i]), i + 1 < n ? static_cast<float_t>(input[i + 1]) : 0);
@@ -183,7 +184,7 @@ namespace FFT {
         fft_iterative(N, values);
 
         for (int i = 0; i <= N / 2; i++) {
-            const int j = N - i & N - 1;
+            const int j = (N - i) & (N - 1);
             complex<float_t> even = extract(N, values, i, 0);
             complex<float_t> odd = extract(N, values, i, 1);
             complex<float_t> aux = even * even + odd * odd * roots[N + i] * roots[N + i];
@@ -196,18 +197,18 @@ namespace FFT {
             values[i] = conjugation(values[i]) * (ONE / N);
 
         fft_iterative(N, values);
-        vector<T_out> result(output_size);
+        std::vector<T_out> result(output_size);
 
         for (int i = 0; i < output_size; i++) {
             float_t value = i % 2 == 0 ? values[i / 2].real() : values[i / 2].imaginary();
-            result[i] = static_cast<T_out>(is_integral_v<T_out> ? round(value) : value);
+            result[i] = static_cast<T_out>(std::is_integral_v<T_out> ? std::round(value) : value);
         }
 
         return result;
     }
 
     template<typename T_out, typename T_in>
-    vector<T_out> multiply(const vector<T_in> &left, const vector<T_in> &right, const bool circular = false) {
+    std::vector<T_out> multiply(const std::vector<T_in> &left, const std::vector<T_in> &right, const bool circular = false) {
         if (left.empty() || right.empty())
             return {};
 
@@ -217,7 +218,7 @@ namespace FFT {
         const int n = static_cast<int>(left.size());
         const int m = static_cast<int>(right.size());
 
-        int output_size = circular ? round_up_power_two(max(n, m)) : n + m - 1;
+        int output_size = circular ? round_up_power_two(std::max(n, m)) : n + m - 1;
         const int N = round_up_power_two(output_size);
         const double brute_force_cost = 0.55 * n * m;
         const double fft_cost = 1.5 * N * (__builtin_ctz(N) + 3);
@@ -226,7 +227,7 @@ namespace FFT {
             auto mod_output_size = [&](const int x) -> int {
                 return x < output_size ? x : x - output_size;
             };
-            vector<T_out> result(output_size, 0);
+            std::vector<T_out> result(output_size, 0);
             for (int i = 0; i < n; i++) {
                 for (int j = 0; j < m; j++) {
                     result[mod_output_size(i + j)] += static_cast<T_out>(left[i]) * static_cast<T_out>(right[j]);
@@ -236,7 +237,7 @@ namespace FFT {
             return result;
         }
 
-        vector<complex<float_t> > values(N, 0);
+        std::vector<complex<float_t>> values(N, 0);
 
         for (int i = 0; i < n; i++)
             values[i].real(static_cast<float_t>(left[i]));
@@ -246,16 +247,16 @@ namespace FFT {
 
         fft_iterative(N, values);
         for (int i = 0; i <= N / 2; i++) {
-            const int j = N - i & N - 1;
+            const int j = (N - i) & (N - 1);
             complex<float_t> product_i = extract(N, values, i, -1);
             values[i] = product_i;
             values[j] = conjugation(product_i);
         }
         invert_fft(N, values);
-        vector<T_out> result(output_size, 0);
+        std::vector<T_out> result(output_size, 0);
         for (int i = 0; i < output_size; i++) {
-            if constexpr (is_integral_v<T_out>) {
-                result[i] = static_cast<T_out>(round(values[i].real()));
+            if constexpr (std::is_integral_v<T_out>) {
+                result[i] = static_cast<T_out>(std::round(values[i].real()));
             } else {
                 result[i] = static_cast<T_out>(values[i].real());
             }
@@ -274,19 +275,19 @@ struct integer {
     static constexpr int DOUBLE_DIV_SECTIONS = 5;
     static constexpr int INTEGER_FFT_CUTOFF = 1500;
     static constexpr int KARATSUBA_CUTOFF = 150;
-    static constexpr uint64_t U64_BOUND = numeric_limits<uint64_t>::max() - static_cast<uint64_t>(BASE) * BASE;
-    static constexpr uint64_t BASE_OVERFLOW_CUTOFF = numeric_limits<uint64_t>::max() / BASE;
+    static constexpr uint64_t U64_BOUND = std::numeric_limits<uint64_t>::max() - static_cast<uint64_t>(BASE) * BASE;
+    static constexpr uint64_t BASE_OVERFLOW_CUTOFF = std::numeric_limits<uint64_t>::max() / BASE;
     static constexpr char FIRST_NUMBER_CHAR = '0';
     static constexpr char LAST_NUMBER_CHAR = '9';
-    vector<value_t> values;
+    std::vector<value_t> values;
 
     integer(const uint64_t x = 0) {
         init(x);
     }
 
-    integer(const string &str) {
+    integer(const std::string &str) {
         const int len = static_cast<int>(str.size());
-        const int num_values = max((len + SECTION - 1) / SECTION, 1);
+        const int num_values = std::max((len + SECTION - 1) / SECTION, 1);
         values.assign(num_values, 0);
 
         int counter = 0;
@@ -342,8 +343,8 @@ struct integer {
         } while (x > 0);
     }
 
-    [[nodiscard]] string to_string() const {
-        string result;
+    [[nodiscard]] std::string to_string() const {
+        std::string result;
 
         for (value_t v: values)
             for (int i = 0; i < SECTION; i++) {
@@ -354,7 +355,7 @@ struct integer {
         while (result.size() > 1 && result.back() == FIRST_NUMBER_CHAR)
             result.pop_back();
 
-        ranges::reverse(result);
+        std::reverse(result.begin(), result.end());
         return result;
     }
 
@@ -456,7 +457,7 @@ struct integer {
             return b * a;
 
         if (n > KARATSUBA_CUTOFF && n + m > INTEGER_FFT_CUTOFF) {
-            const vector<uint64_t> &multiplication = FFT::multiply<uint64_t>(a.values, b.values);
+            const std::vector<uint64_t> &multiplication = FFT::multiply<uint64_t>(a.values, b.values);
             const int N = static_cast<int>(multiplication.size());
             integer product = 0;
             uint64_t carry = 0;
@@ -493,7 +494,7 @@ struct integer {
             value = carry % BASE;
             carry /= BASE;
 
-            for (int i = max(0, index_sum - (m - 1)); i <= min(n - 1, index_sum); i++) {
+            for (int i = std::max(0, index_sum - (m - 1)); i <= std::min(n - 1, index_sum); i++) {
                 value += static_cast<uint64_t>(a.values[i]) * b.values[index_sum - i];
 
                 if (value > U64_BOUND) {
@@ -564,10 +565,10 @@ struct integer {
             other_count++;
         }
 
-        return estimate / other_estimate * pow(BASE, n - m);
+        return estimate / other_estimate * std::pow(BASE, n - m);
     }
 
-    [[nodiscard]] pair<integer, integer> div_mod(const integer &other) const {
+    [[nodiscard]] std::pair<integer, integer> div_mod(const integer &other) const {
         assert(other > 0);
 
         const int n = static_cast<int>(values.size());
@@ -603,7 +604,7 @@ struct integer {
 
         quotient.trim_check();
         remainder.trim_check();
-        return make_pair(quotient, remainder);
+        return std::make_pair(quotient, remainder);
     }
 
     friend integer operator/(const integer &a, const integer &b) { return a.div_mod(b).first; }
@@ -612,12 +613,12 @@ struct integer {
     integer &operator/=(const integer &other) { return *this = *this / other; }
     integer &operator%=(const integer &other) { return *this = *this % other; }
 
-    [[nodiscard]] pair<integer, uint64_t> div_mod(const uint64_t denominator) const {
+    [[nodiscard]] std::pair<integer, uint64_t> div_mod(const uint64_t denominator) const {
         assert(denominator > 0);
 
         if (denominator >= BASE_OVERFLOW_CUTOFF) {
             auto [fst, snd] = div_mod(integer(denominator));
-            return make_pair(fst, static_cast<uint64_t>(snd));
+            return std::make_pair(fst, static_cast<uint64_t>(snd));
         }
 
         const int n = static_cast<int>(values.size());
@@ -634,7 +635,7 @@ struct integer {
         }
 
         quotient.trim_check();
-        return make_pair(quotient, remainder);
+        return std::make_pair(quotient, remainder);
     }
 
     integer operator/(const uint64_t denominator) const {
@@ -684,7 +685,7 @@ struct integer {
         return before;
     }
 
-    friend ostream &operator<<(ostream &os, const integer &x) {
+    friend std::ostream &operator<<(std::ostream &os, const integer &x) {
         return os << x.to_string();
     }
 };
