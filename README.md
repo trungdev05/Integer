@@ -33,3 +33,7 @@ scripts/update_baseline.py --build-dir build
 - `data/` – persisted benchmark metadata (baseline JSON).
 
 See `docs/DEVELOPMENT.md` for detailed workflows and contribution guidelines.
+
+## License
+
+This project is released under the MIT License. See `LICENSE` for details.
