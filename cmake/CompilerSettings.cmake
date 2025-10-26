@@ -1,0 +1,32 @@
+function(auto_detect_compiler_warnings target visibility)
+    if(NOT INTEGER_ENABLE_WARNINGS)
+        return()
+    endif()
+
+    if(MSVC)
+        set(_flags /W4 /permissive-)
+    else()
+        set(_flags -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion)
+    endif()
+
+    if(visibility STREQUAL "INTERFACE")
+        target_compile_options(${target} INTERFACE ${_flags})
+    else()
+        target_compile_options(${target} PRIVATE ${_flags})
+    endif()
+endfunction()
+
+function(auto_detect_sanitizers target)
+    if(NOT INTEGER_ENABLE_SANITIZERS)
+        return()
+    endif()
+
+    if(MSVC)
+        message(WARNING "Sanitizers are not supported on MSVC; disabling for target ${target}")
+        return()
+    endif()
+
+    set(_sanitizers -fsanitize=address,undefined)
+    target_compile_options(${target} PRIVATE ${_sanitizers})
+    target_link_options(${target} PRIVATE ${_sanitizers})
+endfunction()

@@ -3,8 +3,11 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <ostream>
 #include <queue>
+#include <string>
 #include <vector>
 #pragma GCC optimize("O3")
 using namespace std;

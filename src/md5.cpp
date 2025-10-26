@@ -1,46 +1,78 @@
-#include <bits/stdc++.h>
-using namespace std;
+#include "md5.hpp"
 
-constexpr uint32_t MD5_ROTATE_LEFT(const uint32_t x, const uint32_t n) {
-    return x << n | x >> 32 - n;
+#include <cassert>
+#include <cstring>
+
+namespace {
+
+constexpr std::uint32_t MD5_ROTATE_LEFT(const std::uint32_t x, const std::uint32_t n) {
+    return (x << n) | (x >> (32 - n));
 }
 
-constexpr uint32_t MD5_ROUND_TAIL(uint32_t a, const uint32_t b, const uint32_t expr, const uint32_t k, const uint32_t s,
-                              const uint32_t t,
-                              const uint32_t block[16]) {
+constexpr std::uint32_t MD5_ROUND_TAIL(std::uint32_t a,
+                                       const std::uint32_t b,
+                                       const std::uint32_t expr,
+                                       const std::uint32_t k,
+                                       const std::uint32_t s,
+                                       const std::uint32_t t,
+                                       const std::uint32_t block[16]) {
     a += expr + t + block[k];
     return b + MD5_ROTATE_LEFT(a, s);
 }
 
-constexpr uint32_t MD5_ROUND_0(const uint32_t a, const uint32_t b, const uint32_t c, const uint32_t d, const uint32_t k,
-                          const uint32_t s, const uint32_t t,
-                          const uint32_t block[16]) {
-    return MD5_ROUND_TAIL(a, b, d ^ b & (c ^ d), k, s, t, block);
+constexpr std::uint32_t MD5_ROUND_0(std::uint32_t a,
+                                    const std::uint32_t b,
+                                    const std::uint32_t c,
+                                    const std::uint32_t d,
+                                    const std::uint32_t k,
+                                    const std::uint32_t s,
+                                    const std::uint32_t t,
+                                    const std::uint32_t block[16]) {
+    return MD5_ROUND_TAIL(a, b, d ^ (b & (c ^ d)), k, s, t, block);
 }
 
-constexpr uint32_t MD5_ROUND_1(const uint32_t a, const uint32_t b, const uint32_t c, const uint32_t d, const uint32_t k,
-                          const uint32_t s, const uint32_t t,
-                          const uint32_t block[16]) {
-    return MD5_ROUND_TAIL(a, b, c ^ d & (b ^ c), k, s, t, block);
+constexpr std::uint32_t MD5_ROUND_1(std::uint32_t a,
+                                    const std::uint32_t b,
+                                    const std::uint32_t c,
+                                    const std::uint32_t d,
+                                    const std::uint32_t k,
+                                    const std::uint32_t s,
+                                    const std::uint32_t t,
+                                    const std::uint32_t block[16]) {
+    return MD5_ROUND_TAIL(a, b, c ^ (d & (b ^ c)), k, s, t, block);
 }
 
-constexpr uint32_t MD5_ROUND_2(const uint32_t a, const uint32_t b, const uint32_t c, const uint32_t d, const uint32_t k,
-                          const uint32_t s, const uint32_t t,
-                          const uint32_t block[16]) {
+constexpr std::uint32_t MD5_ROUND_2(std::uint32_t a,
+                                    const std::uint32_t b,
+                                    const std::uint32_t c,
+                                    const std::uint32_t d,
+                                    const std::uint32_t k,
+                                    const std::uint32_t s,
+                                    const std::uint32_t t,
+                                    const std::uint32_t block[16]) {
     return MD5_ROUND_TAIL(a, b, b ^ c ^ d, k, s, t, block);
 }
 
-constexpr uint32_t MD5_ROUND_3(const uint32_t a, const uint32_t b, const uint32_t c, const uint32_t d, const uint32_t k,
-                          const uint32_t s, const uint32_t t,
-                          const uint32_t block[16]) {
+constexpr std::uint32_t MD5_ROUND_3(std::uint32_t a,
+                                    const std::uint32_t b,
+                                    const std::uint32_t c,
+                                    const std::uint32_t d,
+                                    const std::uint32_t k,
+                                    const std::uint32_t s,
+                                    const std::uint32_t t,
+                                    const std::uint32_t block[16]) {
     return MD5_ROUND_TAIL(a, b, c ^ (b | ~d), k, s, t, block);
 }
 
-void md5_compress(uint32_t state[4], const uint32_t block[16]) {
-    uint32_t a = state[0];
-    uint32_t b = state[1];
-    uint32_t c = state[2];
-    uint32_t d = state[3];
+}  // namespace
+
+namespace {
+
+void md5_compress(std::uint32_t state[4], const std::uint32_t block[16]) {
+    std::uint32_t a = state[0];
+    std::uint32_t b = state[1];
+    std::uint32_t c = state[2];
+    std::uint32_t d = state[3];
 
     // ROUND0
     a = MD5_ROUND_0(a, b, c, d, 0, 7, 0xD76AA478, block);
@@ -121,39 +153,41 @@ void md5_compress(uint32_t state[4], const uint32_t block[16]) {
 }
 
 
-void md5_hash(const uint8_t *message, const uint32_t len, uint32_t hash[4]) {
+}  // namespace
+
+void md5_hash(const std::uint8_t *message, const std::uint32_t len, std::uint32_t hash[4]) {
     hash[0] = 0x67452301;
     hash[1] = 0xEFCDAB89;
     hash[2] = 0x98BADCFE;
     hash[3] = 0x10325476;
-    for (uint32_t i = 0; i + 64 <= len; i += 64) {
-        md5_compress(hash, reinterpret_cast<const uint32_t *>(message + i));
+    for (std::uint32_t i = 0; i + 64 <= len; i += 64) {
+        md5_compress(hash, reinterpret_cast<const std::uint32_t *>(message + i));
     }
-    uint32_t block[16] = {};
-    auto *byteBlock = reinterpret_cast<uint8_t *>(block);
-    const uint32_t rem = len % 64;
-    memcpy(byteBlock, message + len - rem, rem);
-    byteBlock[rem] = 0x80;
+    std::uint32_t block[16] = {};
+    auto *byte_block = reinterpret_cast<std::uint8_t *>(block);
+    const std::uint32_t rem = len % 64;
+    std::memcpy(byte_block, message + len - rem, rem);
+    byte_block[rem] = 0x80;
     if (rem >= 56) {
         md5_compress(hash, block);
-        memset(block, 0, sizeof(block));
+        std::memset(block, 0, sizeof(block));
     }
-    const uint64_t bitLen = static_cast<uint64_t>(len) * 8;
-    block[14] = static_cast<uint32_t>(bitLen);
-    block[15] = static_cast<uint32_t>(bitLen >> 32);
+    const std::uint64_t bit_len = static_cast<std::uint64_t>(len) * 8;
+    block[14] = static_cast<std::uint32_t>(bit_len);
+    block[15] = static_cast<std::uint32_t>(bit_len >> 32);
 
     md5_compress(hash, block);
 }
 
 std::string md5_hash(const std::string &message) {
-    uint32_t hash[4];
-    md5_hash((uint8_t *) message.c_str(), message.size(), hash);
+    std::uint32_t hash[4];
+    md5_hash(reinterpret_cast<const std::uint8_t *>(message.c_str()), static_cast<std::uint32_t>(message.size()), hash);
     std::string result;
 
-    for (const uint32_t h: hash) {
+    for (const std::uint32_t h : hash) {
         for (int i = 0; i < 4; i++) {
-            result += "0123456789abcdef"[h >> i * 8 + 4 & 0xF];
-            result += "0123456789abcdef"[h >> i * 8 & 0xF];
+            result += "0123456789abcdef"[(h >> (i * 8 + 4)) & 0xF];
+            result += "0123456789abcdef"[(h >> (i * 8)) & 0xF];
         }
     }
 
@@ -166,4 +200,3 @@ void test_hash() {
     const std::string result = md5_hash(message);
     assert(result == expected);
 }
-

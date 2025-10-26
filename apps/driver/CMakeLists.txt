@@ -1,0 +1,6 @@
+add_executable(integer_driver main.cpp)
+target_link_libraries(integer_driver PRIVATE integer md5)
+auto_detect_compiler_warnings(integer_driver PRIVATE)
+auto_detect_sanitizers(integer_driver)
+
+set_target_properties(integer_driver PROPERTIES OUTPUT_NAME integer-driver)
