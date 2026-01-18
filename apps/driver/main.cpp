@@ -57,9 +57,15 @@ void benchmark_multiplication(const int digits) {
 
 }  // namespace
 
-int main() {
-    run_regressions();
-    constexpr int digits = 100000;
+int main(int argc, char* argv[]) {
+    // run_regressions(); 
+    // Skip regressions to save time when benchmarking specific sizes
+    
+    int digits = 100000;
+    if (argc > 1) {
+        digits = std::stoi(argv[1]);
+    }
+    // 
     std::cout << "Benchmarking multiplication of two " << digits << "-digit numbers..." << std::endl;
     benchmark_multiplication(digits);
     return 0;

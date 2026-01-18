@@ -84,8 +84,11 @@ def main():
         sys.exit(1)
         
     print(f"Using executable: {calculator_bin}")
-    print(f"Running {args.num_tests} random tests per operation with approx {args.digits} digits...")
+    import time
 
+    print(f"Running {args.num_tests} random tests per operation with approx {args.digits} digits...")
+    
+    start_time = time.perf_counter()
     ops = ["+", "-", "*", "/"]
     
     for i in range(args.num_tests):
@@ -96,7 +99,7 @@ def main():
         
         digits_a = random.randint(d_min, d_max)
         digits_b = random.randint(d_min, d_max)
-        
+
         a = generate_large_int(digits_a)
         b = generate_large_int(digits_b)
         
@@ -115,10 +118,12 @@ def main():
         if b == 0: b = 1
         if not test_operation(calculator_bin, "/", a, b): return 1
         
-        sys.stdout.write(f"\rProgress: {i+1}/{args.num_tests}")
-        sys.stdout.flush()
+        if (i+1) % 10 == 0:
+            print(f"Completed {i+1}/{args.num_tests} tests...")
 
-    print("\n\nAll tests passed successfully!")
+    end_time = time.perf_counter()
+    total_time = end_time - start_time
+    print(f"\nAll tests passed successfully in {total_time:.2f} seconds!")
     return 0
 
 if __name__ == "__main__":
