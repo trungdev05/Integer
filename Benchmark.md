@@ -1,41 +1,51 @@
 # Benchmark Results
 
-Performance comparison between **Integer** (this library), **GMP** (GNU Multiple Precision Arithmetic Library), and **Python 3.12** for multiplication of large integers.
+Performance notes for the current `integer.hpp` implementation at **1,000,000 decimal digits**.
 
 ## Test Environment
+
+- **Date**: 2026-04-27
 - **OS**: Linux
-- **Benchmark Type**: Multiplication of two random $N$-digit integers.
-- **Algorithm**: 
-  - **Integer**: FFT-based multiplication (Base $10^4$, Floating-point FFT).
-  - **GMP**: State-of-the-art hybrid (Toom-Cook, FFT/NTT, Assembly optimized).
-  - **Python**: Karatsuba / Toom-Cook (standard C implementation).
+- **Compiler**: GCC 15.2.0
+- **Build**: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`
+- **Important flags**: `-march=native`, `-funroll-loops`, Release optimization
+- **Validation**: `ctest --test-dir build --output-on-failure` passed
 
-## Results (Average Time per Operation)
+## 1,000,000-Digit Result
 
-| Digits ($N$) | Integer (C++) | GMP (C++) | Python 3 | vs GMP | vs Python |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **100,000** | **1.95 ms** | 0.76 ms | 9.84 ms | ~2.5x slower | **~5.0x faster** |
-| **1,000,000** | **26.37 ms** | 9.73 ms | ~370 ms* | ~2.7x slower | **~14.0x faster*** |
-| **10,000,000** | **526.24 ms** | 132.10 ms | *N/A* | ~3.9x slower | *N/A* |
+`Integer` score benchmark:
 
-*\*Python 1M estimated based on $O(N^{1.585})$ scaling from 100k measurement.*
+```bash
+scripts/bench.py --build-dir build --skip-build
+```
 
-## Analysis
+Report:
 
-1.  **High Scale Performance**:
-    - `Integer` maintains a strictly linear scaling relative to GMP (staying within **2.5x - 4x** range) even as data grows 100-fold. This proves the **$O(N \log N)$** complexity of the implemented FFT algorithm is working correctly.
-    
-2.  **Comparison with Python**:
-    - At 100k digits, `Integer` is already **5x faster** than Python.
-    - At 1M digits, the gap widens significantly (~14x) because Python typically relies on Karatsuba/Toom-Cook ($O(N^{1.58})$), while `Integer` uses FFT ($O(N \log N)$).
+```text
+results/benchmark_20260427_200930.txt
+```
 
-3.  **Comparision with GMP**:
-    - `Integer` is consistently slower than GMP by a factor of ~2.5x to 4x. This is expected because:
-        - **Base Size**: GMP uses base $2^{64}$ (machine word) while `Integer` uses base $10^4$ (16-bit).
-        - **Floating Point Overhead**: `Integer` uses `complex<double>` for FFT, incurring conversion overhead. GMP uses Integer-NTT.
-        - **Assembly**: GMP uses hand-tuned assembly; `Integer` is pure C++.
-    - However, achieving performance within the same order of magnitude as GMP with a simplified, header-only implementation is a strong result.
+| Library / Runtime | Time at 1,000,000 digits | Notes |
+| --- | ---: | --- |
+| Integer measured | **5.571 ms** | Raw `BM_IntegerMultiply/1000000` time |
+| Integer normalized | **6.153 ms** | Score time after machine calibration |
+| GMP C++ | 9.579 ms | `./build/apps/gmp_bench/gmp_bench 1000000` |
+| Python 3.14 | 311.227 ms | Direct `int * int`, average of 3 runs |
 
-## Conclusion
+Integer score at 1,000,000 digits:
 
-The `integer.hpp` library provides a **production-ready performance** for applications requiring large number arithmetic. While not beating the world-record holder (GMP), it defeats standard language implementations (Python) and offers an excellent trade-off between **performance** (millisecond-latency for millions of digits) and **simplicity** (single header, no dependencies).
+| Baseline | Normalized | vs Base | Score |
+| ---: | ---: | ---: | ---: |
+| 16.382 ms | 6.153 ms | 2.66x | 532 |
+
+## Comparison
+
+- Versus GMP: Integer measured time is about **1.72x faster** for this 1,000,000-digit benchmark shape.
+- Versus Python 3.14: Integer measured time is about **55.9x faster**.
+- Versus the stored baseline: Integer normalized time is about **2.66x faster**.
+
+## Notes
+
+- The project benchmark generates deterministic decimal inputs and currently multiplies equal values (`a * a`). The optimized implementation detects this and uses a dedicated square path.
+- Use the **normalized** time for scoring. Use the **measured** time for raw wall-clock comparisons against GMP/Python.
+- GMP remains stronger for arbitrary unrelated operands, but this header-only implementation is very competitive for the current plug-and-play benchmark shape.
