@@ -11,7 +11,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-#pragma GCC optimize("O3")
 
 namespace FFT {
     template<typename float_t>
@@ -65,6 +64,17 @@ namespace FFT {
     static constexpr double PI = 3.141592653589793238462643383279502884;
     inline thread_local std::vector<complex<float_t>> roots = {{0, 0}, {1, 0}};
     inline thread_local std::vector<int> bit_reverse;
+    inline thread_local std::vector<complex<float_t>> work_buffer;
+
+    inline std::vector<complex<float_t>> &zeroed_work_buffer(const int n) {
+        work_buffer.assign(n, complex<float_t>());
+        return work_buffer;
+    }
+
+    inline uint64_t round_nonnegative_to_u64(const float_t value) {
+        const float_t adjusted = value + static_cast<float_t>(0.5);
+        return adjusted > 0 ? static_cast<uint64_t>(adjusted) : 0;
+    }
 
     inline int round_up_power_two(const int n) {
         int bit = n == 0 ? -1 : 31 - __builtin_clz(n);
@@ -108,14 +118,87 @@ namespace FFT {
         prepare_roots(n);
         bit_reorder(n, values);
 
-        for (int len = 1; len < n; len *= 2)
-            for (int start = 0; start < n; start += 2 * len)
+        complex<float_t> *__restrict__ v = values.data();
+        const complex<float_t> *__restrict__ r = roots.data();
+
+        int len = 1;
+        for (; len * 2 < n; len *= 4) {
+            const int two_len = 2 * len;
+            const int four_len = 4 * len;
+            for (int start = 0; start < n; start += four_len) {
                 for (int i = 0; i < len; i++) {
-                    const complex<float_t> &even = values[start + i];
-                    complex<float_t> odd = values[start + len + i] * roots[len + i];
-                    values[start + len + i] = even - odd;
-                    values[start + i] = even + odd;
+                    const int i0 = start + i;
+                    const int i1 = i0 + len;
+                    const int i2 = i1 + len;
+                    const int i3 = i2 + len;
+
+                    const float_t x0 = v[i0].x;
+                    const float_t y0 = v[i0].y;
+                    const float_t x1 = v[i1].x;
+                    const float_t y1 = v[i1].y;
+                    const float_t x2 = v[i2].x;
+                    const float_t y2 = v[i2].y;
+                    const float_t x3 = v[i3].x;
+                    const float_t y3 = v[i3].y;
+
+                    const float_t w1x = r[len + i].x;
+                    const float_t w1y = r[len + i].y;
+                    const float_t t1x = x1 * w1x - y1 * w1y;
+                    const float_t t1y = x1 * w1y + y1 * w1x;
+                    const float_t t3x = x3 * w1x - y3 * w1y;
+                    const float_t t3y = x3 * w1y + y3 * w1x;
+
+                    const float_t a0x = x0 + t1x;
+                    const float_t a0y = y0 + t1y;
+                    const float_t b0x = x0 - t1x;
+                    const float_t b0y = y0 - t1y;
+                    const float_t a2x = x2 + t3x;
+                    const float_t a2y = y2 + t3y;
+                    const float_t b2x = x2 - t3x;
+                    const float_t b2y = y2 - t3y;
+
+                    const float_t w2x = r[two_len + i].x;
+                    const float_t w2y = r[two_len + i].y;
+                    const float_t u2x = a2x * w2x - a2y * w2y;
+                    const float_t u2y = a2x * w2y + a2y * w2x;
+
+                    const float_t w3x = r[two_len + len + i].x;
+                    const float_t w3y = r[two_len + len + i].y;
+                    const float_t u3x = b2x * w3x - b2y * w3y;
+                    const float_t u3y = b2x * w3y + b2y * w3x;
+
+                    v[i0].x = a0x + u2x;
+                    v[i0].y = a0y + u2y;
+                    v[i2].x = a0x - u2x;
+                    v[i2].y = a0y - u2y;
+                    v[i1].x = b0x + u3x;
+                    v[i1].y = b0y + u3y;
+                    v[i3].x = b0x - u3x;
+                    v[i3].y = b0y - u3y;
                 }
+            }
+        }
+
+        if (len < n) {
+            for (int start = 0; start < n; start += 2 * len) {
+                for (int i = 0; i < len; i++) {
+                    const int a_index = start + i;
+                    const int b_index = a_index + len;
+                    const float_t even_x = v[a_index].x;
+                    const float_t even_y = v[a_index].y;
+                    const float_t bx = v[b_index].x;
+                    const float_t by = v[b_index].y;
+                    const float_t wx = r[len + i].x;
+                    const float_t wy = r[len + i].y;
+                    const float_t odd_x = bx * wx - by * wy;
+                    const float_t odd_y = bx * wy + by * wx;
+                    v[b_index].x = even_x - odd_x;
+                    v[b_index].y = even_y - odd_y;
+                    v[a_index].x = even_x + odd_x;
+                    v[a_index].y = even_y + odd_y;
+                }
+            }
+        }
     }
 
     inline complex<float_t> extract(const int n, const std::vector<complex<float_t>> &values, const int index,
@@ -176,7 +259,7 @@ namespace FFT {
         }
 
         prepare_roots(2 * N);
-        std::vector<complex<float_t>> values(N, 0);
+        auto &values = zeroed_work_buffer(N);
 
         for (int i = 0; i < n; i += 2)
             values[i / 2] = complex(static_cast<float_t>(input[i]), i + 1 < n ? static_cast<float_t>(input[i + 1]) : 0);
@@ -185,12 +268,34 @@ namespace FFT {
 
         for (int i = 0; i <= N / 2; i++) {
             const int j = (N - i) & (N - 1);
-            complex<float_t> even = extract(N, values, i, 0);
-            complex<float_t> odd = extract(N, values, i, 1);
-            complex<float_t> aux = even * even + odd * odd * roots[N + i] * roots[N + i];
-            complex<float_t> tmp = even * odd;
-            values[i] = aux - complex<float_t>(0, 2) * tmp;
-            values[j] = conjugation(aux) - complex<float_t>(0, 2) * conjugation(tmp);
+            const float_t ix = values[i].x;
+            const float_t iy = values[i].y;
+            const float_t jx = values[j].x;
+            const float_t jy = values[j].y;
+
+            const float_t even_x = static_cast<float_t>(0.5) * (ix + jx);
+            const float_t even_y = static_cast<float_t>(0.5) * (iy - jy);
+            const float_t odd_x = static_cast<float_t>(0.5) * (iy + jy);
+            const float_t odd_y = static_cast<float_t>(-0.5) * (ix - jx);
+
+            const float_t even2_x = even_x * even_x - even_y * even_y;
+            const float_t even2_y = static_cast<float_t>(2) * even_x * even_y;
+            const float_t odd2_x = odd_x * odd_x - odd_y * odd_y;
+            const float_t odd2_y = static_cast<float_t>(2) * odd_x * odd_y;
+            const float_t rx = roots[N + i].x;
+            const float_t ry = roots[N + i].y;
+            const float_t r2_x = rx * rx - ry * ry;
+            const float_t r2_y = static_cast<float_t>(2) * rx * ry;
+
+            const float_t aux_x = even2_x + odd2_x * r2_x - odd2_y * r2_y;
+            const float_t aux_y = even2_y + odd2_x * r2_y + odd2_y * r2_x;
+            const float_t tmp_x = even_x * odd_x - even_y * odd_y;
+            const float_t tmp_y = even_x * odd_y + even_y * odd_x;
+
+            values[i].x = aux_x + static_cast<float_t>(2) * tmp_y;
+            values[i].y = aux_y - static_cast<float_t>(2) * tmp_x;
+            values[j].x = aux_x - static_cast<float_t>(2) * tmp_y;
+            values[j].y = -aux_y - static_cast<float_t>(2) * tmp_x;
         }
 
         for (int i = 0; i < N; i++)
@@ -237,7 +342,7 @@ namespace FFT {
             return result;
         }
 
-        std::vector<complex<float_t>> values(N, 0);
+        auto &values = zeroed_work_buffer(N);
 
         for (int i = 0; i < n; i++)
             values[i].real(static_cast<float_t>(left[i]));
@@ -263,6 +368,195 @@ namespace FFT {
         }
 
         return result;
+    }
+
+    template<typename digit_t, uint64_t base, typename Getter>
+    std::vector<digit_t> normalize_to_base_digits(const int output_size, Getter &&getter) {
+        std::vector<digit_t> digits(static_cast<size_t>(output_size) + 8, 0);
+        uint64_t carry = 0;
+        int pos = 0;
+
+        for (; pos < output_size; pos++) {
+            const uint64_t coefficient = round_nonnegative_to_u64(getter(pos));
+            const uint64_t value = coefficient + carry;
+            digits[pos] = static_cast<digit_t>(value % base);
+            carry = value / base;
+        }
+
+        while (carry > 0) {
+            if (pos >= static_cast<int>(digits.size()))
+                digits.push_back(0);
+            digits[pos++] = static_cast<digit_t>(carry % base);
+            carry /= base;
+        }
+
+        if (pos == 0)
+            pos = 1;
+        digits.resize(static_cast<size_t>(pos));
+        while (digits.size() > 1 && digits.back() == 0)
+            digits.pop_back();
+        return digits;
+    }
+
+    template<typename digit_t, uint64_t base>
+    std::vector<digit_t> normalize_interleaved_to_base_digits(const int output_size,
+                                                              const std::vector<complex<float_t>> &values) {
+        std::vector<digit_t> digits(static_cast<size_t>(output_size) + 8, 0);
+        uint64_t carry = 0;
+        int pos = 0;
+        int k = 0;
+
+        for (; pos + 1 < output_size; k++) {
+            uint64_t coefficient = round_nonnegative_to_u64(values[k].x);
+            uint64_t value = coefficient + carry;
+            digits[pos++] = static_cast<digit_t>(value % base);
+            carry = value / base;
+
+            coefficient = round_nonnegative_to_u64(values[k].y);
+            value = coefficient + carry;
+            digits[pos++] = static_cast<digit_t>(value % base);
+            carry = value / base;
+        }
+
+        if (pos < output_size) {
+            const uint64_t coefficient = round_nonnegative_to_u64(values[k].x);
+            const uint64_t value = coefficient + carry;
+            digits[pos++] = static_cast<digit_t>(value % base);
+            carry = value / base;
+        }
+
+        while (carry > 0) {
+            if (pos >= static_cast<int>(digits.size()))
+                digits.push_back(0);
+            digits[pos++] = static_cast<digit_t>(carry % base);
+            carry /= base;
+        }
+
+        if (pos == 0)
+            pos = 1;
+        digits.resize(static_cast<size_t>(pos));
+        while (digits.size() > 1 && digits.back() == 0)
+            digits.pop_back();
+        return digits;
+    }
+
+    template<typename digit_t, uint64_t base, typename T_in>
+    std::vector<digit_t> square_to_base_digits(const std::vector<T_in> &input) {
+        if (input.empty())
+            return {0};
+
+        const int n = static_cast<int>(input.size());
+        const int output_size = 2 * n - 1;
+        const int N = round_up_power_two(n);
+
+        const double brute_force_cost = 0.4 * n * n;
+        const double fft_cost = 2.0 * N * (__builtin_ctz(N) + 3);
+
+        if (brute_force_cost < fft_cost) {
+            std::vector<uint64_t> coefficients(output_size, 0);
+            for (int i = 0; i < n; i++) {
+                coefficients[2 * i] += static_cast<uint64_t>(input[i]) * static_cast<uint64_t>(input[i]);
+                for (int j = i + 1; j < n; j++)
+                    coefficients[i + j] += 2 * static_cast<uint64_t>(input[i]) * static_cast<uint64_t>(input[j]);
+            }
+            return normalize_to_base_digits<digit_t, base>(output_size, [&](const int i) -> float_t {
+                return static_cast<float_t>(coefficients[i]);
+            });
+        }
+
+        prepare_roots(2 * N);
+        auto &values = zeroed_work_buffer(N);
+
+        for (int i = 0; i < n; i += 2)
+            values[i / 2] = complex(static_cast<float_t>(input[i]), i + 1 < n ? static_cast<float_t>(input[i + 1]) : 0);
+
+        fft_iterative(N, values);
+
+        for (int i = 0; i <= N / 2; i++) {
+            const int j = (N - i) & (N - 1);
+            const float_t ix = values[i].x;
+            const float_t iy = values[i].y;
+            const float_t jx = values[j].x;
+            const float_t jy = values[j].y;
+
+            const float_t even_x = static_cast<float_t>(0.5) * (ix + jx);
+            const float_t even_y = static_cast<float_t>(0.5) * (iy - jy);
+            const float_t odd_x = static_cast<float_t>(0.5) * (iy + jy);
+            const float_t odd_y = static_cast<float_t>(-0.5) * (ix - jx);
+
+            const float_t even2_x = even_x * even_x - even_y * even_y;
+            const float_t even2_y = static_cast<float_t>(2) * even_x * even_y;
+            const float_t odd2_x = odd_x * odd_x - odd_y * odd_y;
+            const float_t odd2_y = static_cast<float_t>(2) * odd_x * odd_y;
+            const float_t rx = roots[N + i].x;
+            const float_t ry = roots[N + i].y;
+            const float_t r2_x = rx * rx - ry * ry;
+            const float_t r2_y = static_cast<float_t>(2) * rx * ry;
+
+            const float_t aux_x = even2_x + odd2_x * r2_x - odd2_y * r2_y;
+            const float_t aux_y = even2_y + odd2_x * r2_y + odd2_y * r2_x;
+            const float_t tmp_x = even_x * odd_x - even_y * odd_y;
+            const float_t tmp_y = even_x * odd_y + even_y * odd_x;
+
+            values[i].x = aux_x + static_cast<float_t>(2) * tmp_y;
+            values[i].y = aux_y - static_cast<float_t>(2) * tmp_x;
+            values[j].x = aux_x - static_cast<float_t>(2) * tmp_y;
+            values[j].y = -aux_y - static_cast<float_t>(2) * tmp_x;
+        }
+
+        for (int i = 0; i < N; i++)
+            values[i] = conjugation(values[i]) * (ONE / N);
+
+        fft_iterative(N, values);
+
+        return normalize_interleaved_to_base_digits<digit_t, base>(output_size, values);
+    }
+
+    template<typename digit_t, uint64_t base, typename T_in>
+    std::vector<digit_t> multiply_to_base_digits(const std::vector<T_in> &left, const std::vector<T_in> &right) {
+        if (left.empty() || right.empty())
+            return {0};
+
+        if (left == right)
+            return square_to_base_digits<digit_t, base>(left);
+
+        const int n = static_cast<int>(left.size());
+        const int m = static_cast<int>(right.size());
+        const int output_size = n + m - 1;
+        const int N = round_up_power_two(output_size);
+        const double brute_force_cost = 0.55 * n * m;
+        const double fft_cost = 1.5 * N * (__builtin_ctz(N) + 3);
+
+        if (brute_force_cost < fft_cost) {
+            std::vector<uint64_t> coefficients(output_size, 0);
+            for (int i = 0; i < n; i++)
+                for (int j = 0; j < m; j++)
+                    coefficients[i + j] += static_cast<uint64_t>(left[i]) * static_cast<uint64_t>(right[j]);
+            return normalize_to_base_digits<digit_t, base>(output_size, [&](const int i) -> float_t {
+                return static_cast<float_t>(coefficients[i]);
+            });
+        }
+
+        auto &values = zeroed_work_buffer(N);
+
+        for (int i = 0; i < n; i++)
+            values[i].real(static_cast<float_t>(left[i]));
+
+        for (int i = 0; i < m; i++)
+            values[i].imaginary(static_cast<float_t>(right[i]));
+
+        fft_iterative(N, values);
+        for (int i = 0; i <= N / 2; i++) {
+            const int j = (N - i) & (N - 1);
+            complex<float_t> product_i = extract(N, values, i, -1);
+            values[i] = product_i;
+            values[j] = conjugation(product_i);
+        }
+        invert_fft(N, values);
+
+        return normalize_to_base_digits<digit_t, base>(output_size, [&](const int i) -> float_t {
+            return values[i].real();
+        });
     }
 }
 
@@ -457,18 +751,8 @@ struct integer {
             return b * a;
 
         if (n > KARATSUBA_CUTOFF && n + m > INTEGER_FFT_CUTOFF) {
-            const std::vector<uint64_t> &multiplication = FFT::multiply<uint64_t>(a.values, b.values);
-            const int N = static_cast<int>(multiplication.size());
-            integer product = 0;
-            uint64_t carry = 0;
-
-            for (int i = 0; i < N || carry > 0; i++) {
-                uint64_t value = (i < N ? multiplication[i] : 0) + carry;
-                carry = value / BASE;
-                value %= BASE;
-                product.checked_add(i, value);
-            }
-
+            integer product;
+            product.values = FFT::multiply_to_base_digits<value_t, BASE>(a.values, b.values);
             product.trim_check();
             return product;
         }

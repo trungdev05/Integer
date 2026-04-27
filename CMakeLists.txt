@@ -16,6 +16,9 @@ target_include_directories(integer INTERFACE
     "${PROJECT_SOURCE_DIR}/include"
 )
 target_compile_features(integer INTERFACE cxx_std_20)
+if(NOT MSVC)
+    target_compile_options(integer INTERFACE -march=native -funroll-loops)
+endif()
 
 add_library(md5 STATIC src/md5.cpp)
 target_include_directories(md5 PUBLIC
