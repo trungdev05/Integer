@@ -16,6 +16,10 @@ Run the benchmark suite and compare against the stored baseline:
 scripts/bench.py --build-dir build
 ```
 
+Benchmark scores are normalized with a same-machine calibration workload when
+`data/baseline.json` contains `calibration_times`. This keeps `-march=native`
+enabled while reducing score drift across different CPUs.
+
 To refresh the baseline after confirmed improvements:
 
 ```bash

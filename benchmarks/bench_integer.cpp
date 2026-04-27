@@ -2,7 +2,9 @@
 
 #include <benchmark/benchmark.h>
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -32,6 +34,21 @@ void log_digits(benchmark::State &state, std::size_t digits) {
     state.counters["digits"] = static_cast<double>(digits);
 }
 
+std::vector<std::uint64_t> make_calibration_data(std::size_t digits) {
+    const std::size_t sections = (digits + 3) / 4;
+    std::vector<std::uint64_t> data(sections);
+    std::uint64_t value = 0x9e3779b97f4a7c15ULL ^ static_cast<std::uint64_t>(digits);
+
+    for (auto &item : data) {
+        value ^= value >> 12;
+        value ^= value << 25;
+        value ^= value >> 27;
+        item = value * 0x2545f4914f6cdd1dULL;
+    }
+
+    return data;
+}
+
 }  // namespace
 
 static void BM_IntegerMultiply(benchmark::State &state) {
@@ -41,6 +58,23 @@ static void BM_IntegerMultiply(benchmark::State &state) {
     for (auto _ : state) {
         auto result = ops.lhs * ops.rhs;
         benchmark::DoNotOptimize(result);
+    }
+}
+
+static void BM_MachineCalibration(benchmark::State &state) {
+    const std::size_t digits = static_cast<std::size_t>(state.range(0));
+    const std::vector<std::uint64_t> data = make_calibration_data(digits);
+    log_digits(state, digits);
+
+    for (auto _ : state) {
+        std::uint64_t acc = 0x243f6a8885a308d3ULL;
+        for (std::uint64_t value : data) {
+            acc ^= value + 0x9e3779b97f4a7c15ULL + (acc << 6) + (acc >> 2);
+            acc *= 0xbf58476d1ce4e5b9ULL;
+            acc ^= acc >> 31;
+        }
+        benchmark::DoNotOptimize(acc);
+        benchmark::ClobberMemory();
     }
 }
 
@@ -83,6 +117,15 @@ BENCHMARK(BM_IntegerMultiply)
     ->Args({500000})
     ->Args({1000000})
     ->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_MachineCalibration)
+    ->Args({10000})
+    ->Args({20000})
+    ->Args({50000})
+    ->Args({100000})
+    ->Args({200000})
+    ->Args({500000})
+    ->Args({1000000})
+    ->Unit(benchmark::kMicrosecond);
 BENCHMARK(BM_IntegerAdd)
     ->Args({10000})
     ->Args({20000})

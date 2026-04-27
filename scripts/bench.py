@@ -32,6 +32,9 @@ class Comparison:
     digits: int
     measured: float
     baseline: float | None
+    calibration: float | None
+    machine_scale: float | None
+    normalized: float
     score: int
     ratio: float | None
 
@@ -45,11 +48,11 @@ def load_baseline(path: Path) -> Dict:
         return json.load(handle)
 
 
-def parse_benchmark_payload(payload: Dict) -> List[BenchmarkResult]:
+def parse_named_benchmark_payload(payload: Dict, prefix: str) -> List[BenchmarkResult]:
     results: List[BenchmarkResult] = []
     for entry in payload.get("benchmarks", []):
         name = entry.get("name", "")
-        if not name.startswith("BM_IntegerMultiply/"):
+        if not name.startswith(prefix):
             continue
         try:
             digits = int(name.split("/")[1])
@@ -62,19 +65,46 @@ def parse_benchmark_payload(payload: Dict) -> List[BenchmarkResult]:
     return results
 
 
-def compute_scores(results: List[BenchmarkResult], baseline: Dict) -> List[Comparison]:
+def parse_benchmark_payload(payload: Dict) -> List[BenchmarkResult]:
+    return parse_named_benchmark_payload(payload, "BM_IntegerMultiply/")
+
+
+def parse_calibration_payload(payload: Dict) -> List[BenchmarkResult]:
+    return parse_named_benchmark_payload(payload, "BM_MachineCalibration/")
+
+
+def compute_scores(
+    results: List[BenchmarkResult],
+    baseline: Dict,
+    calibration_results: List[BenchmarkResult] | None = None,
+) -> List[Comparison]:
     scores: List[Comparison] = []
     baseline_times: Dict[str, float] = baseline.get("baseline_times", {})
+    calibration_times: Dict[str, float] = baseline.get("calibration_times", {})
     scoring_system = baseline.get("scoring_system", {})
     baseline_score = scoring_system.get("baseline_score", 200)
     max_score = scoring_system.get("max_score", 1000)
+    calibration_by_digits = {
+        item.digits: item.time_seconds
+        for item in calibration_results or []
+    }
 
     for result in results:
         base_time = baseline_times.get(str(result.digits))
+        base_calibration = calibration_times.get(str(result.digits))
+        calibration = calibration_by_digits.get(result.digits)
+        machine_scale = None
+        normalized = result.time_seconds
         ratio = None
         score = 0
+
+        if base_calibration and calibration:
+            machine_scale = calibration / base_calibration
+            if machine_scale:
+                normalized = result.time_seconds / machine_scale
+
         if base_time:
-            ratio = base_time / result.time_seconds if result.time_seconds else float("inf")
+            ratio = base_time / normalized if normalized else float("inf")
             score = min(max_score, int(baseline_score * ratio))
         else:
             score = min(max_score, 200)
@@ -82,6 +112,9 @@ def compute_scores(results: List[BenchmarkResult], baseline: Dict) -> List[Compa
             digits=result.digits,
             measured=result.time_seconds,
             baseline=base_time,
+            calibration=calibration,
+            machine_scale=machine_scale,
+            normalized=normalized,
             score=score,
             ratio=ratio,
         ))
@@ -101,18 +134,24 @@ def write_report(comparisons: List[Comparison], baseline_meta: Dict, destination
             handle.write(f"  Timestamp: {info.get('timestamp', 'n/a')}\n")
             handle.write(f"  Seed:      {info.get('seed', 'n/a')}\n")
             handle.write("\n")
-        handle.write(f"{'Digits':>12} {'Measured(s)':>15} {'Baseline(s)':>15} {'vs Base':>9} {'Score':>7}\n")
-        handle.write("-" * 64 + "\n")
+        handle.write(
+            f"{'Digits':>12} {'Measured(s)':>15} {'Normalized(s)':>15} "
+            f"{'Baseline(s)':>15} {'Scale':>8} {'vs Base':>9} {'Score':>7}\n"
+        )
+        handle.write("-" * 91 + "\n")
         total = 0
         for comparison in comparisons:
             ratio_display = f"{comparison.ratio:>7.2f}x" if comparison.ratio is not None else "   n/a"
             baseline_display = f"{comparison.baseline:>15.6f}" if comparison.baseline else f"{0:>15.6f}"
+            scale_display = f"{comparison.machine_scale:>8.3f}" if comparison.machine_scale else f"{1:>8.3f}"
             handle.write(
-                f"{comparison.digits:12d} {comparison.measured:15.6f} {baseline_display} {ratio_display:>9} {comparison.score:7d}\n"
+                f"{comparison.digits:12d} {comparison.measured:15.6f} "
+                f"{comparison.normalized:15.6f} {baseline_display} "
+                f"{scale_display} {ratio_display:>9} {comparison.score:7d}\n"
             )
             total += comparison.score
         avg = total / len(comparisons) if comparisons else 0
-        handle.write("-" * 64 + "\n")
+        handle.write("-" * 91 + "\n")
         handle.write(f"Total Score:   {total}\n")
         handle.write(f"Average Score: {avg:.1f}\n")
 
@@ -146,13 +185,14 @@ def main(argv: List[str]) -> int:
     completed = run_process([str(benchmark_binary), "--benchmark_format=json"])
     payload = json.loads(completed.stdout)
     results = parse_benchmark_payload(payload)
+    calibration_results = parse_calibration_payload(payload)
 
     if not results:
         print("No benchmark results found in payload", file=sys.stderr)
         return 1
 
     baseline = load_baseline(args.baseline) if args.baseline.exists() else {}
-    comparisons = compute_scores(results, baseline)
+    comparisons = compute_scores(results, baseline, calibration_results)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     report_path = args.results_dir / f"benchmark_{timestamp}.txt"
