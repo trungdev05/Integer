@@ -78,6 +78,24 @@ static void BM_MachineCalibration(benchmark::State &state) {
     }
 }
 
+static void BM_IntegerMultiplyDistinct(benchmark::State &state) {
+    const std::size_t digits = static_cast<std::size_t>(state.range(0));
+    operands ops = make_operands(digits);
+    std::uint32_t seed = 12345;
+    for (integer *operand : {&ops.lhs, &ops.rhs}) {
+        for (auto &digit : operand->values) {
+            seed = seed * 1664525u + 1013904223u;
+            digit = static_cast<integer::value_t>((seed >> 16) % integer::BASE);
+        }
+        operand->values.back() = integer::BASE / 10;
+    }
+    log_digits(state, digits);
+    for (auto _ : state) {
+        auto result = ops.lhs * ops.rhs;
+        benchmark::DoNotOptimize(result);
+    }
+}
+
 static void BM_IntegerAdd(benchmark::State &state) {
     const std::size_t digits = static_cast<std::size_t>(state.range(0));
     const operands ops = make_operands(digits);
@@ -143,5 +161,7 @@ BENCHMARK(BM_IntegerDivide)
     ->Args({5000})
     ->Args({10000})
     ->Unit(benchmark::kMillisecond);
+
+BENCHMARK(BM_IntegerMultiplyDistinct)->Args({1000000})->Unit(benchmark::kMillisecond);
 
 BENCHMARK_MAIN();

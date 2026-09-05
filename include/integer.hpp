@@ -114,10 +114,8 @@ namespace FFT {
         }
     }
 
-    inline void fft_iterative(const int n, std::vector<complex<float_t>> &values) {
-        prepare_roots(n);
-        bit_reorder(n, values);
-
+    // DIT butterflies consume a bit-reversed spectrum and produce natural-order output.
+    inline void fft_from_bit_reversed(const int n, std::vector<complex<float_t>> &values) {
         complex<float_t> *__restrict__ v = values.data();
         const complex<float_t> *__restrict__ r = roots.data();
 
@@ -201,6 +199,43 @@ namespace FFT {
         }
     }
 
+    inline void fft_iterative(const int n, std::vector<complex<float_t>> &values) {
+        prepare_roots(n);
+        bit_reorder(n, values);
+        fft_from_bit_reversed(n, values);
+    }
+
+    // DIF butterflies produce the ordering consumed by DIT, without a permutation pass.
+    inline void fft_to_bit_reversed(const int n, std::vector<complex<float_t>> &values) {
+        prepare_roots(n);
+        complex<float_t> *__restrict__ v = values.data();
+        const complex<float_t> *__restrict__ r = roots.data();
+
+        for (int len = n / 4; len > 0; len /= 4) {
+            for (int start = 0; start < n; start += 4 * len) {
+                for (int i = 0; i < len; i++) {
+                    const int i0 = start + i, i1 = i0 + len, i2 = i1 + len, i3 = i2 + len;
+                    const auto a = v[i0] + v[i2];
+                    const auto b = v[i1] + v[i3];
+                    const auto c = (v[i0] - v[i2]) * r[2 * len + i];
+                    const auto d = (v[i1] - v[i3]) * r[3 * len + i];
+                    v[i0] = a + b;
+                    v[i1] = (a - b) * r[len + i];
+                    v[i2] = c + d;
+                    v[i3] = (c - d) * r[len + i];
+                }
+            }
+        }
+
+        if (__builtin_ctz(n) % 2 != 0) {
+            for (int i = 0; i < n; i += 2) {
+                const auto a = v[i], b = v[i + 1];
+                v[i] = a + b;
+                v[i + 1] = a - b;
+            }
+        }
+    }
+
     inline complex<float_t> extract_product(const int n, const std::vector<complex<float_t>> &values, const int index) {
         const int other = (n - index) & (n - 1);
         return (conjugation(values[other] * values[other]) - values[index] * values[index]) *
@@ -221,6 +256,36 @@ namespace FFT {
 
         for (int i = n - 1; i >= 0; i--)
             values[i] = i % 2 == 0 ? values[i / 2].real() : values[i / 2].imaginary();
+    }
+
+    template<typename T_in>
+    std::vector<complex<float_t>> &convolve(const std::vector<T_in> &left, const std::vector<T_in> &right, const int n) {
+        auto &values = zeroed_work_buffer(n);
+        for (std::size_t i = 0; i < left.size(); i++)
+            values[i].real(static_cast<float_t>(left[i]));
+        for (std::size_t i = 0; i < right.size(); i++)
+            values[i].imaginary(static_cast<float_t>(right[i]));
+
+        fft_to_bit_reversed(n, values);
+        const float_t scale = ONE / n;
+        values[0] = values[0].real() * values[0].imaginary() * scale;
+        if (n > 1)
+            values[1] = values[1].real() * values[1].imaginary() * scale;
+
+        // In bit-reversed order, k and -k are mirrored within each power-of-two block.
+        for (std::size_t block = 2; block < values.size(); block *= 2) {
+            for (std::size_t i = block; i < block + block / 2; i++) {
+                const std::size_t j = 3 * block - 1 - i;
+                const auto other = conjugation(values[j]);
+                const auto product = (values[i] + other) * (values[i] - other) *
+                                     complex<float_t>(0, -0.25 * scale);
+                values[i] = conjugation(product);
+                values[j] = product;
+            }
+        }
+
+        fft_from_bit_reversed(n, values);
+        return values;
     }
 
     constexpr float_t SPLIT_CUTOFF = 2e15;
@@ -253,22 +318,7 @@ namespace FFT {
             return result;
         }
 
-        auto &values = zeroed_work_buffer(N);
-
-        for (int i = 0; i < n; i++)
-            values[i].real(static_cast<float_t>(left[i]));
-
-        for (int i = 0; i < m; i++)
-            values[i].imaginary(static_cast<float_t>(right[i]));
-
-        fft_iterative(N, values);
-        for (int i = 0; i <= N / 2; i++) {
-            const int j = (N - i) & (N - 1);
-            complex<float_t> product_i = extract_product(N, values, i);
-            values[i] = product_i;
-            values[j] = conjugation(product_i);
-        }
-        invert_fft(N, values);
+        const auto &values = convolve(left, right, N);
         std::vector<T_out> result(output_size, 0);
         for (int i = 0; i < output_size; i++) {
             if constexpr (std::is_integral_v<T_out>) {
@@ -331,23 +381,7 @@ namespace FFT {
             });
         }
 
-        auto &values = zeroed_work_buffer(N);
-
-        for (int i = 0; i < n; i++)
-            values[i].real(static_cast<float_t>(left[i]));
-
-        for (int i = 0; i < m; i++)
-            values[i].imaginary(static_cast<float_t>(right[i]));
-
-        fft_iterative(N, values);
-        for (int i = 0; i <= N / 2; i++) {
-            const int j = (N - i) & (N - 1);
-            complex<float_t> product_i = extract_product(N, values, i);
-            values[i] = product_i;
-            values[j] = conjugation(product_i);
-        }
-        invert_fft(N, values);
-
+        const auto &values = convolve(left, right, N);
         return normalize_to_base_digits<digit_t, base>(output_size, [&](const int i) -> float_t {
             return values[i].real();
         });

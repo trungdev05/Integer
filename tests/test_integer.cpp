@@ -309,6 +309,79 @@ TEST_CASE("integer arithmetic matches reference decimal implementation", "[integ
     }
 }
 
+TEST_CASE("FFT convolution preserves signed and fractional coefficients", "[fft][multiply]") {
+    std::mt19937_64 rng(20260906u);
+    std::uniform_int_distribution<int> dist(-100, 100);
+    CHECK(FFT::multiply<int>({}, std::vector<int>{1}).empty());
+    for (const bool circular : {false, true}) {
+        std::vector<int> left(257), right(321);
+        for (auto *operand : {&left, &right})
+            for (auto &value : *operand)
+                value = dist(rng);
+        const std::size_t size = circular ? 512 : left.size() + right.size() - 1;
+        std::vector<int> expected(size, 0);
+        for (std::size_t i = 0; i < left.size(); i++)
+            for (std::size_t j = 0; j < right.size(); j++)
+                expected[(i + j) % size] += left[i] * right[j];
+        CHECK(FFT::multiply<int>(left, right, circular) == expected);
+
+        std::vector<double> fractional_left(left.begin(), left.end());
+        std::vector<double> fractional_right(right.begin(), right.end());
+        for (auto &value : fractional_left)
+            value *= 0.25;
+        for (auto &value : fractional_right)
+            value *= 0.125;
+        const auto product = FFT::multiply<double>(fractional_left, fractional_right, circular);
+        REQUIRE(product.size() == expected.size());
+        for (std::size_t i = 0; i < size; i++)
+            CHECK(std::abs(product[i] - expected[i] / 32.0) < 1e-8);
+    }
+}
+
+TEST_CASE("multiplication across algorithm and FFT size boundaries", "[integer][multiply]") {
+    std::mt19937_64 rng(20260906u);
+    const std::vector<std::pair<std::size_t, std::size_t>> sizes = {
+        {599, 601}, {3000, 3000}, {3001, 3001}, {4097, 4101}, {3200, 611}, {10000, 603}, {3001, 3001}
+    };
+    for (const auto &[n, m] : sizes) {
+        std::string left = decimal::random_digits(rng, n);
+        std::string right = decimal::random_digits(rng, m);
+        left[0] = '1';
+        right[0] = '2';
+        const integer a(left), b(right);
+        const auto expected = decimal::multiply(left, right);
+        CHECK((a * b).to_string() == expected);
+        CHECK((b * a).to_string() == expected);
+    }
+}
+
+TEST_CASE("million digit multiplication propagates long carries", "[integer][multiply][large]") {
+    constexpr std::size_t n = 1000000;
+    const integer a(std::string(n, '9'));
+    for (const std::size_t m : {n, n - 3}) {
+        const integer b(std::string(m, '9'));
+        const std::string expected = std::string(m - 1, '9') + '8' + std::string(n - m, '9') +
+                                     std::string(m - 1, '0') + '1';
+        CHECK((a * b).to_string() == expected);
+    }
+}
+
+TEST_CASE("million random digit products match Python integer hashes", "[integer][multiply][large]") {
+    const auto digits = [](std::uint32_t seed) {
+        std::string result(1000000, '0');
+        for (char &digit : result) {
+            seed = seed * 1664525u + 1013904223u;
+            digit = static_cast<char>('0' + (seed >> 16) % 10);
+        }
+        result[0] = '1';
+        return result;
+    };
+    const integer a(digits(12345)), b(digits(67890));
+    // Independently computed with Python: hashlib.md5(str(int(left) * int(right)).encode()).hexdigest().
+    CHECK(md5_hash((a * b).to_string()) == "5aaca2eda5895ee4855a363d1c599f59");
+    CHECK(md5_hash((a * a).to_string()) == "f30749c8a9c99a9a258afc5d3fb04c78");
+}
+
 TEST_CASE("integer shifts and increments behave correctly", "[integer][utility]") {
     const integer value("123456789");
     const int shift = 3;
